@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd expense-tracker && npm install && npm run build",
+  "outputDirectory": "expense-tracker/dist/expense-tracker/browser",
+  "framework": null,
+  "rewrites": [
+    { "source": "/((?!_next|api|assets).*)", "destination": "/index.html" }
+  ]
+}
