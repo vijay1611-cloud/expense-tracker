@@ -39,17 +39,17 @@ import { AuthService } from '../../services/auth.service';
           class="inline-flex items-center gap-2 rounded-full bg-white border border-zinc-200 px-3 py-1 text-xs font-medium text-zinc-700 shadow-card"
         >
           <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-          AI reads your receipts so you don't have to
+          AI-powered statement parsing — your data stays yours
         </span>
         <h1
           class="mt-6 text-4xl sm:text-6xl font-bold tracking-tight leading-[1.05]"
         >
-          Your expenses,<br />
-          <span class="text-zinc-500">extracted automatically.</span>
+          Drop a statement,<br />
+          <span class="text-zinc-500">see every transaction.</span>
         </h1>
         <p class="mt-6 text-lg text-zinc-600 max-w-xl mx-auto leading-relaxed">
-          Connect Gmail once. We find receipts, invoices, and subscription charges, then turn them
-          into clean transactions you can search and sort.
+          Upload your monthly UPI or bank statement PDF. We extract merchants, amounts, dates, and
+          categories automatically — no inbox access required.
         </p>
         <div class="mt-8 flex items-center justify-center gap-3">
           <a routerLink="/login">
@@ -57,27 +57,27 @@ import { AuthService } from '../../services/auth.service';
           </a>
         </div>
         <p class="mt-4 text-xs text-zinc-500">
-          We request read-only Gmail access. Your email stays in Gmail.
+          Sign-in is just for identity — we never read your email.
         </p>
       </section>
 
       <section class="max-w-5xl mx-auto px-4 sm:px-8 pb-24 grid sm:grid-cols-3 gap-4">
         <div class="bg-white rounded-2xl shadow-card border border-zinc-100 p-6">
-          <h3 class="font-semibold">Connect once</h3>
+          <h3 class="font-semibold">Sign in once</h3>
           <p class="mt-2 text-sm text-zinc-600 leading-relaxed">
-            Sign in with Google and grant Gmail read-only access. That's it.
+            Use your Google account just to identify yourself. No inbox or Drive access.
           </p>
         </div>
         <div class="bg-white rounded-2xl shadow-card border border-zinc-100 p-6">
-          <h3 class="font-semibold">AI extraction</h3>
+          <h3 class="font-semibold">Drop a PDF</h3>
           <p class="mt-2 text-sm text-zinc-600 leading-relaxed">
-            We scan recent transaction emails and pull out merchant, amount, date, and category.
+            PhonePe, GPay, Paytm, or bank statement — drag it onto the dashboard.
           </p>
         </div>
         <div class="bg-white rounded-2xl shadow-card border border-zinc-100 p-6">
           <h3 class="font-semibold">See it all</h3>
           <p class="mt-2 text-sm text-zinc-600 leading-relaxed">
-            Monthly totals, category breakdown, and a searchable history.
+            Monthly totals, category breakdown, searchable transaction history.
           </p>
         </div>
       </section>

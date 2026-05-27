@@ -1,25 +1,27 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { TransactionsService, SortKey } from '../../services/transactions.service';
 import { CardComponent } from '../../shared/ui/card.component';
+import { ButtonComponent } from '../../shared/ui/button.component';
 import { CurrencyFormatPipe } from '../../shared/pipes/currency-format.pipe';
 import { EmptyStateComponent } from '../../shared/ui/empty-state.component';
 import { SkeletonComponent } from '../../shared/ui/skeleton.component';
 import { CategoryBadgeComponent } from '../../shared/ui/category-badge.component';
 import { TransactionsFiltersComponent } from './filters.component';
-import { SyncButtonComponent } from '../dashboard/sync-button.component';
 
 @Component({
   selector: 'app-transactions',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    RouterLink,
     CardComponent,
+    ButtonComponent,
     CurrencyFormatPipe,
     EmptyStateComponent,
     SkeletonComponent,
     CategoryBadgeComponent,
     TransactionsFiltersComponent,
-    SyncButtonComponent,
   ],
   template: `
     <div class="space-y-6">
@@ -30,7 +32,9 @@ import { SyncButtonComponent } from '../dashboard/sync-button.component';
             {{ tx.filtered().length }} of {{ tx.count() }} shown
           </p>
         </div>
-        <app-sync-button />
+        <a routerLink="/dashboard">
+          <app-button variant="primary">Upload statement</app-button>
+        </a>
       </header>
 
       <app-card>
@@ -47,7 +51,7 @@ import { SyncButtonComponent } from '../dashboard/sync-button.component';
         } @else if (tx.filtered().length === 0) {
           <app-empty-state
             title="No matching transactions"
-            description="Try a different filter, or sync your Gmail to import more."
+            description="Try a different filter, or upload a statement on the dashboard to import more."
           />
         } @else {
           <div class="overflow-x-auto">
