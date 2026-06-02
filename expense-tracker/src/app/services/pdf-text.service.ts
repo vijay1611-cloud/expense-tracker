@@ -56,12 +56,9 @@ export class PdfTextService {
     if (!this.loaderPromise) {
       this.loaderPromise = (async () => {
         const pdfjs = await import('pdfjs-dist');
-        // pdfjs requires a worker. Use the bundled module worker.
-        const workerUrl = new URL(
-          'pdfjs-dist/build/pdf.worker.min.mjs',
-          import.meta.url,
-        ).toString();
-        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+        // angular.json copies the worker to the dist root at build time, so
+        // it's served from `/pdf.worker.min.mjs` alongside index.html.
+        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
         return pdfjs;
       })();
     }
