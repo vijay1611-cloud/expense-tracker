@@ -65,11 +65,13 @@ Deno.serve(async (req) => {
     return json({ error: 'Unauthorized' }, 401);
   }
 
-  // Pull the last 60 days so we can compare current vs previous month.
+  // Pull a wide window (last 18 months) so we can anchor the insight on the
+  // most recent month that actually has data — not the calendar-current one.
+  // This is important because users often upload past statements.
   const now = new Date();
-  const sixtyDaysAgo = new Date(now);
-  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-  const fromIso = sixtyDaysAgo.toISOString().slice(0, 10);
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() - 18);
+  const fromIso = cutoff.toISOString().slice(0, 10);
 
   const { data: rows, error: txErr } = await userClient
     .from('transactions')
@@ -81,15 +83,15 @@ Deno.serve(async (req) => {
     return json({ error: `Read failed: ${txErr.message}` }, 500);
   }
 
-  const stats = computeStats((rows ?? []) as TxRow[]);
-
-  if (stats.thisMonthTotal === 0 && stats.lastMonthTotal === 0) {
+  const all = (rows ?? []) as TxRow[];
+  if (all.length === 0) {
     return json({
       insight: 'Upload a recent statement to see your first insight here.',
-      stats,
+      stats: emptyStats(),
     });
   }
 
+  const stats = computeStats(all);
   const insight = await askGemini(stats);
   return json({ insight, stats });
 });
@@ -103,17 +105,37 @@ interface Stats {
   subscriptionTotalThisMonth: number;
   transactionCountThisMonth: number;
   currency: string;
+  isBackdated: boolean;     // true when the anchor month isn't the current calendar month
+}
+
+function emptyStats(): Stats {
+  const now = new Date();
+  return {
+    thisMonthLabel: monthLabel(now),
+    thisMonthTotal: 0,
+    lastMonthTotal: 0,
+    pctChange: null,
+    topCategoriesThisMonth: [],
+    subscriptionTotalThisMonth: 0,
+    transactionCountThisMonth: 0,
+    currency: 'INR',
+    isBackdated: false,
+  };
 }
 
 function computeStats(rows: TxRow[]): Stats {
-  const now = new Date();
-  const thisYM = ym(now);
-  const lastDate = new Date(now);
-  lastDate.setMonth(lastDate.getMonth() - 1);
-  const lastYM = ym(lastDate);
+  // Anchor month = the most recent month that has at least one transaction.
+  // This way users who upload an old statement still get a relevant insight.
+  const monthsPresent = new Set(rows.map((r) => r.transaction_date.slice(0, 7)));
+  const sortedMonths = [...monthsPresent].sort().reverse();
+  const anchorYM = sortedMonths[0]!;            // most recent
+  const anchorDate = parseYM(anchorYM);
+  const prevDate = new Date(anchorDate);
+  prevDate.setMonth(prevDate.getMonth() - 1);
+  const prevYM = ym(prevDate);
 
-  const thisMonth = rows.filter((r) => r.transaction_date.startsWith(thisYM));
-  const lastMonth = rows.filter((r) => r.transaction_date.startsWith(lastYM));
+  const thisMonth = rows.filter((r) => r.transaction_date.startsWith(anchorYM));
+  const lastMonth = rows.filter((r) => r.transaction_date.startsWith(prevYM));
 
   const thisMonthTotal = sum(thisMonth.map((r) => r.amount));
   const lastMonthTotal = sum(lastMonth.map((r) => r.amount));
@@ -122,7 +144,7 @@ function computeStats(rows: TxRow[]): Stats {
     ? ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100
     : null;
 
-  // Top 3 categories this month
+  // Top 3 categories in the anchor month
   const byCategory = new Map<string, number>();
   for (const r of thisMonth) {
     byCategory.set(r.category, (byCategory.get(r.category) ?? 0) + r.amount);
@@ -153,7 +175,7 @@ function computeStats(rows: TxRow[]): Stats {
   }
 
   return {
-    thisMonthLabel: monthLabel(now),
+    thisMonthLabel: monthLabel(anchorDate),
     thisMonthTotal: round(thisMonthTotal),
     lastMonthTotal: round(lastMonthTotal),
     pctChange: pctChange === null ? null : Math.round(pctChange),
@@ -161,7 +183,13 @@ function computeStats(rows: TxRow[]): Stats {
     subscriptionTotalThisMonth: round(subscriptionTotalThisMonth),
     transactionCountThisMonth: thisMonth.length,
     currency,
+    isBackdated: anchorYM !== ym(new Date()),
   };
+}
+
+function parseYM(ym: string): Date {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1);
 }
 
 async function askGemini(stats: Stats): Promise<string> {

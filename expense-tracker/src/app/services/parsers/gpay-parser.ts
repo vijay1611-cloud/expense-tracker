@@ -1,10 +1,18 @@
 // Parses extracted text from a Google Pay monthly statement PDF into a list
-// of structured transactions. Heuristic: works against the standard GPay
-// statement template that lists each transaction across a few lines with a
-// date, the counterparty's name/handle, a type (Paid/Received), and an amount.
+// of structured transactions.
 //
-// Returns expense rows only. Refunds, money received, and aggregate rows are
-// filtered out by `is_expense: false` on the parsed entry.
+// Real GPay format (as observed in actual statements) is a 5-7 line block
+// per transaction:
+//
+//   01 Feb, 2026                       <- date (anchor)
+//   09:27 AM                           <- time
+//   Paid to MUNAF PROTEINS             <- direction + merchant
+//   UPI Transaction ID: 117983425544
+//   Paid by IDBI Bank 0036
+//   ₹140                               <- amount
+//
+// "Received from" blocks have the same shape but represent money IN and are
+// filtered out (not expenses). The returned array contains only OUT-flows.
 
 export interface ParsedTransaction {
   is_expense: boolean;
@@ -12,98 +20,99 @@ export interface ParsedTransaction {
   amount: number;
   currency: string;        // 'INR' for GPay
   transaction_date: string; // ISO YYYY-MM-DD
-  raw_type: string;        // 'Paid' / 'Received' / 'Sent' etc., kept for debug
+  raw_type: string;        // 'Paid' for outflows we keep, kept for debug
 }
 
-const INR_AMOUNT = /(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)/i;
-// Date forms commonly seen in GPay PDFs:
-//   2 Apr 2026 | 02-04-2026 | 02/04/2026 | 2 April 2026
-const DATE_PATTERNS: { re: RegExp; parse: (m: RegExpMatchArray) => string | null }[] = [
-  // 2 Apr 2026 / 02 April 2026
-  {
-    re: /\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b/,
-    parse: (m) => isoFromParts(m[1], monthFromName(m[2]), m[3]),
-  },
-  // 02-04-2026 / 02/04/2026 (assumed DD-MM-YYYY for India)
-  {
-    re: /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/,
-    parse: (m) => isoFromParts(m[1], Number(m[2]), m[3]),
-  },
-  // 2026-04-02 (ISO direct)
-  {
-    re: /\b(\d{4})-(\d{2})-(\d{2})\b/,
-    parse: (m) => `${m[1]}-${m[2]}-${m[3]}`,
-  },
-];
+const DATE_AT_LINE_START =
+  /^(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b/;
 
-// Keywords classifying the transaction direction.
-const OUTFLOW_HINTS = /\b(paid|sent|to|debit|debited|spent)\b/i;
-const INFLOW_HINTS = /\b(received|from|credit|credited|refund|cashback|reversal)\b/i;
+const PAID_TO = /^Paid\s+to\s+(.+?)\s*$/i;
+const RECEIVED_FROM = /^Received\s+from\s+.+$/i;
+
+// Match ₹ followed by an amount. Permissive about spacing and trailing chars.
+const INR_AMOUNT = /(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)/i;
+
+// Block scanning bound: we look at most this many lines past the date for the
+// direction + merchant + amount before giving up on a block.
+const BLOCK_LOOKAHEAD = 8;
 
 export function parseGPayStatement(rawText: string): ParsedTransaction[] {
-  const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
   const out: ParsedTransaction[] = [];
 
-  // Sliding window of 1-4 lines tries to assemble one transaction at a time.
-  // Each GPay transaction usually occupies 2-3 lines in the extracted text:
-  //   <merchant / counterparty>
-  //   Paid / Received   ₹123.45   2 Apr 2026
-  // We look for a line containing both an amount AND a date, then take the
-  // immediately preceding lines as the merchant context.
   for (let i = 0; i < lines.length; i++) {
-    const window = lines.slice(Math.max(0, i - 2), i + 2).join(' ');
-    const amountMatch = window.match(INR_AMOUNT);
-    if (!amountMatch) continue;
-
-    const dateIso = findDate(window);
+    const dateIso = matchDate(lines[i]);
     if (!dateIso) continue;
 
-    const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
-    if (!Number.isFinite(amount) || amount <= 0) continue;
+    // Scan forward through the block until we hit the next date line OR
+    // until we've collected direction + merchant + amount OR until the
+    // lookahead expires.
+    let direction: 'out' | 'in' | null = null;
+    let merchant: string | null = null;
+    let amount: number | null = null;
 
-    // Decide direction
-    const outflow = OUTFLOW_HINTS.test(window);
-    const inflow = INFLOW_HINTS.test(window);
-    if (inflow && !outflow) continue;       // skip credits/refunds
-    if (!outflow && !inflow) continue;      // skip ambiguous
+    const end = Math.min(i + 1 + BLOCK_LOOKAHEAD, lines.length);
+    for (let j = i + 1; j < end; j++) {
+      // Hitting another date means we've crossed into the next transaction.
+      if (matchDate(lines[j])) break;
 
-    const merchant = extractMerchant(lines, i, amountMatch.index ?? -1, dateIso);
-    if (!merchant) continue;
+      if (direction === null) {
+        const paid = lines[j].match(PAID_TO);
+        if (paid) {
+          direction = 'out';
+          merchant = cleanMerchant(paid[1]);
+        } else if (RECEIVED_FROM.test(lines[j])) {
+          direction = 'in';
+        }
+      }
 
-    // Dedup within the same statement (parser may match overlapping windows)
-    const key = `${dateIso}|${amount}|${merchant.toLowerCase()}`;
-    if (out.some((t) => `${t.transaction_date}|${t.amount}|${t.merchant.toLowerCase()}` === key)) {
-      continue;
+      if (amount === null) {
+        const amt = lines[j].match(INR_AMOUNT);
+        if (amt) {
+          const v = parseFloat(amt[1].replace(/,/g, ''));
+          if (Number.isFinite(v) && v > 0) amount = v;
+        }
+      }
+
+      if (direction !== null && amount !== null) break;
     }
 
-    out.push({
-      is_expense: true,
-      merchant,
-      amount,
-      currency: 'INR',
-      transaction_date: dateIso,
-      raw_type: outflow ? 'Paid' : 'Sent',
-    });
+    if (direction === 'out' && merchant && amount !== null) {
+      out.push({
+        is_expense: true,
+        merchant,
+        amount,
+        currency: 'INR',
+        transaction_date: dateIso,
+        raw_type: 'Paid',
+      });
+    }
   }
+
   return out;
 }
 
-function findDate(window: string): string | null {
-  for (const { re, parse } of DATE_PATTERNS) {
-    const m = window.match(re);
-    if (m) {
-      const iso = parse(m);
-      if (iso) return iso;
-    }
-  }
-  return null;
-}
-
-function isoFromParts(day: string, monthNum: number | null, year: string): string | null {
-  if (!monthNum || monthNum < 1 || monthNum > 12) return null;
-  const d = Number(day);
-  if (!d || d < 1 || d > 31) return null;
-  return `${year}-${String(monthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+function matchDate(line: string): string | null {
+  // Examples we want to handle:
+  //   01 Feb, 2026
+  //   01 Feb 2026
+  //   1 February 2026
+  //   01-Feb-2026  (less common, but cheap to support)
+  const dashed = line.match(/^(\d{1,2})-([A-Za-z]{3,9})-(\d{4})\b/);
+  const spaced = line.match(DATE_AT_LINE_START);
+  const m = dashed ?? spaced;
+  if (!m) return null;
+  const monthNum = monthFromName(m[2]);
+  if (!monthNum) return null;
+  const day = Number(m[1]);
+  if (!day || day < 1 || day > 31) return null;
+  const year = Number(m[3]);
+  if (!year || year < 2000 || year > 2100) return null;
+  return `${year}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 const MONTH_NAMES: Record<string, number> = {
@@ -122,31 +131,15 @@ const MONTH_NAMES: Record<string, number> = {
 };
 
 function monthFromName(s: string): number | null {
-  return MONTH_NAMES[s.toLowerCase()] ?? null;
+  const key = s.toLowerCase().replace(/[.,]+$/, '');
+  return MONTH_NAMES[key] ?? null;
 }
 
-function extractMerchant(
-  lines: string[],
-  matchedIndex: number,
-  _amountPos: number,
-  _date: string,
-): string | null {
-  // Walk back up to 2 lines from the match looking for a non-amount, non-date,
-  // non-keyword line. That's our best guess for the merchant name.
-  for (let j = matchedIndex; j >= Math.max(0, matchedIndex - 2); j--) {
-    const line = lines[j];
-    if (!line) continue;
-    if (INR_AMOUNT.test(line)) continue;
-    if (findDate(line)) continue;
-    if (/^(paid|received|sent|to|from)\b/i.test(line)) continue;
-    if (line.length < 2 || line.length > 80) continue;
-    // Strip transaction id-like tokens
-    const cleaned = line
-      .replace(/UPI Ref(?:erence)?:?\s*\d+/i, '')
-      .replace(/Transaction\s*ID:?\s*\S+/i, '')
-      .replace(/^\W+|\W+$/g, '')
-      .trim();
-    if (cleaned.length >= 2) return cleaned.slice(0, 80);
-  }
-  return null;
+function cleanMerchant(s: string): string {
+  return s
+    .replace(/\s*\(.*?\)\s*$/, '')   // strip trailing (parenthetical)
+    .replace(/\s+/g, ' ')
+    .replace(/^\W+|\W+$/g, '')
+    .trim()
+    .slice(0, 100);
 }
