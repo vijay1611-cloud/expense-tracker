@@ -33,7 +33,7 @@ import { TransactionCategory } from '../../../models/transaction.model';
       @if (tx.recent().length === 0) {
         <app-empty-state
           title="Nothing yet"
-          description="Sync your Gmail to populate transactions."
+          description="Upload a statement to populate transactions."
         />
       } @else {
         <ul class="divide-y divide-zinc-100">

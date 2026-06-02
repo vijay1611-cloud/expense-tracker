@@ -20,7 +20,7 @@ import { TransactionCategory } from '../../../models/transaction.model';
       </div>
 
       @if (rows().length === 0) {
-        <app-empty-state title="No spending yet" description="Sync your Gmail to see categories." />
+        <app-empty-state title="No spending yet" description="Upload a statement to see categories." />
       } @else {
         <ul class="space-y-4">
           @for (row of rows(); track row.category) {

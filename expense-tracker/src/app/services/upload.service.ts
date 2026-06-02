@@ -1,12 +1,26 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { SupabaseService } from './supabase.service';
+import { PdfTextService } from './pdf-text.service';
+import { parseGPayStatement, ParsedTransaction } from './parsers/gpay-parser';
+import { categorize } from './category-rules';
 import { UploadError, UploadResult } from '../models/upload-result.model';
+import { TransactionCategory } from '../models/transaction.model';
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+
+export interface StructuredTransaction {
+  merchant: string;
+  amount: number;
+  currency: string;
+  transaction_date: string;
+  category: TransactionCategory;
+  is_subscription: boolean;
+}
 
 @Injectable({ providedIn: 'root' })
 export class UploadService {
   private readonly supabase = inject(SupabaseService);
+  private readonly pdfText = inject(PdfTextService);
 
   private readonly _uploading = signal(false);
   readonly uploading = this._uploading.asReadonly();
@@ -30,41 +44,79 @@ export class UploadService {
     this._uploading.set(true);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const [fileBase64, fileHash] = await Promise.all([
-        bytesToBase64(bytes),
-        sha256Hex(bytes),
-      ]);
+      const fileHash = await sha256Hex(bytes);
 
-      const { data, error } = await this.supabase.client.functions.invoke<UploadResult>(
-        'upload-statement',
-        {
-          body: {
-            filename: file.name,
-            fileBase64,
-            fileHash,
-          },
-        },
-      );
+      // ---- Client-side: extract text → parse → categorize ----
+      let parsed: ParsedTransaction[];
+      try {
+        const text = await this.pdfText.extractAllText(bytes);
+        parsed = parseGPayStatement(text);
+      } catch (e) {
+        throw new UploadError(
+          `Couldn't read the PDF: ${e instanceof Error ? e.message : 'unknown error'}. ` +
+            `If the file is password-protected, please decrypt it first.`,
+        );
+      }
 
-      if (error) {
-        const ctx = (error as unknown as { context?: Response }).context;
-        if (ctx && typeof ctx.json === 'function') {
-          try {
-            const errBody = await ctx.json() as { error?: string };
-            throw new UploadError(errBody.error ?? error.message, ctx.status);
-          } catch (e) {
-            if (e instanceof UploadError) throw e;
-          }
-        }
-        throw new UploadError(error.message);
+      if (parsed.length === 0) {
+        // Still send to backend so we log the upload attempt — but no rows go in.
+        return await this.send(file, fileHash, []);
       }
-      if (!data) {
-        throw new UploadError('Empty response from upload function.');
-      }
-      return data;
+
+      // Apply rules engine
+      const structured: StructuredTransaction[] = parsed
+        .filter((p) => p.is_expense)
+        .map((p) => {
+          const { category, is_subscription } = categorize(p.merchant);
+          return {
+            merchant: p.merchant,
+            amount: p.amount,
+            currency: p.currency,
+            transaction_date: p.transaction_date,
+            category,
+            is_subscription,
+          };
+        });
+
+      return await this.send(file, fileHash, structured);
     } finally {
       this._uploading.set(false);
     }
+  }
+
+  private async send(
+    file: File,
+    fileHash: string,
+    transactions: StructuredTransaction[],
+  ): Promise<UploadResult> {
+    const { data, error } = await this.supabase.client.functions.invoke<UploadResult>(
+      'upload-statement',
+      {
+        body: {
+          filename: file.name,
+          fileSize: file.size,
+          fileHash,
+          transactions,
+        },
+      },
+    );
+
+    if (error) {
+      const ctx = (error as unknown as { context?: Response }).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const errBody = await ctx.json() as { error?: string };
+          throw new UploadError(errBody.error ?? error.message, ctx.status);
+        } catch (e) {
+          if (e instanceof UploadError) throw e;
+        }
+      }
+      throw new UploadError(error.message);
+    }
+    if (!data) {
+      throw new UploadError('Empty response from upload function.');
+    }
+    return data;
   }
 }
 
@@ -73,13 +125,4 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(buf)]
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(bin);
 }

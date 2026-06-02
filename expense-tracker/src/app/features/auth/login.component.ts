@@ -18,8 +18,8 @@ import { ButtonComponent } from '../../shared/ui/button.component';
         >
         <h1 class="mt-5 text-2xl font-semibold tracking-tight text-zinc-900">Sign in</h1>
         <p class="mt-2 text-sm text-zinc-500 max-w-xs">
-          Use your Google account. We'll request read-only access to your Gmail so we can find
-          receipts.
+          Sign in with your Google account. We use it for identity only — no inbox or Drive
+          access.
         </p>
       </div>
 

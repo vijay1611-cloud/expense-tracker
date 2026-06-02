@@ -41,5 +41,5 @@ secret = ""
 redirect_uri = "http://localhost:54321/auth/v1/callback"
 url = ""
 
-[functions.sync-gmail]
+[functions.upload-statement]
 verify_jwt = true

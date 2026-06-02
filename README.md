@@ -10,18 +10,31 @@ AI-powered expense tracking. Sign in with Google, upload your monthly UPI/bank s
 
 ## How it works
 
-1. User signs in via Supabase Auth with the Google provider. **Only basic `email profile` scopes** — the app never reads your inbox, Drive, or any other Google data.
-2. User drags a PDF statement onto the dashboard (or clicks to pick a file).
-3. The browser hashes the file (SHA-256) for dedup, base64-encodes it, and POSTs to the `upload-statement` Edge Function.
-4. The Edge Function:
-   - Verifies the user's JWT.
-   - Validates the file: PDF magic bytes, ≤5 MB, valid SHA-256 hash.
-   - Checks dedup — if the same file hash already exists for this user, skips.
-   - Sends the PDF to Gemini 2.5 Flash-Lite as `inlineData` with a `responseSchema` array.
-   - For each extracted transaction, inserts a row into `transactions`. First row uses the bare file hash as `source_email`; subsequent rows get `<hash>:row:<N>` for uniqueness.
-   - Falls back to **truncated-JSON salvage** if Gemini hits the output-token cap — recovers all complete transaction objects.
-   - Records the upload in `upload_runs` (filename, size, hash, counts, duration).
-5. Dashboard and Transactions pages re-read from Postgres and update via signals.
+Two ingest paths plus an AI-powered insights view.
+
+### 1. PDF upload (default path)
+
+1. User signs in via Google OAuth — only basic `email profile` scopes.
+2. User drags a PDF (e.g. a GPay monthly statement) onto the dashboard.
+3. **Client-side in the browser:**
+   - pdf.js extracts text from each page.
+   - A format-specific parser (currently GPay) converts text into structured transactions.
+   - A rules engine maps each merchant to a category (Swiggy→Food, Uber→Transport, Netflix→Subscriptions, etc.).
+   - SHA-256 hashes the file for dedup.
+4. Browser POSTs **structured JSON only** to the `upload-statement` Edge Function. The PDF bytes never leave your machine. AI is not invoked.
+5. Edge Function validates, dedups, inserts rows, and records an `upload_run` audit row.
+
+### 2. Narrow Gmail sync (opt-in)
+
+1. In Settings, the user lists exact subject phrases (e.g. `"Your HDFC e-Statement"`) to scan.
+2. Clicking *Connect Gmail* triggers a second OAuth pass requesting `gmail.readonly`.
+3. *Sync Gmail* posts the user's Google access token to `sync-gmail-narrow`.
+4. The Edge Function searches Gmail with `subject:"<exact pattern>"` for each enabled pattern (last 90 days, max 15 messages total).
+5. For each matched email, Gemini extracts one transaction. Inserted with `source_email = "gmail:<msg_id>"` to avoid colliding with PDF-derived hashes.
+
+### 3. AI insights (passive)
+
+The dashboard's *Monthly insight* card calls `generate-insight`, which queries the user's last 60 days of transactions and asks Gemini for a 2-4 sentence summary. **Only aggregate numbers go to Gemini** (totals, top categories, subscription count) — never raw merchant names. Privacy-safe even on free tier.
 
 ---
 
@@ -29,12 +42,14 @@ AI-powered expense tracking. Sign in with Google, upload your monthly UPI/bank s
 
 ```
 .
-├── expense-tracker/             Angular 19 SPA
+├── expense-tracker/             Angular 19 SPA (includes pdf.js)
 ├── supabase/
 │   ├── config.toml
-│   ├── migrations/              SQL: users + transactions + upload_runs + RLS
+│   ├── migrations/              SQL: users + transactions + upload_runs + gmail_subjects + RLS
 │   └── functions/
-│       └── upload-statement/    Deno Edge Function (Gemini PDF extraction)
+│       ├── upload-statement/    Insert pre-parsed transactions (no AI)
+│       ├── sync-gmail-narrow/   Pull from Gmail by user-specified subjects (AI extraction)
+│       └── generate-insight/    Aggregate stats + AI summary for dashboard
 ├── .env.example
 ├── vercel.json                  Frontend deploy config
 └── README.md
