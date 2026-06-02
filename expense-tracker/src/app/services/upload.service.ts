@@ -50,7 +50,22 @@ export class UploadService {
       let parsed: ParsedTransaction[];
       try {
         const text = await this.pdfText.extractAllText(bytes);
+
+        // TEMP DEBUG — remove once parser is tuned.
+        console.group('[pdf-debug]');
+        console.log('Raw extracted text length:', text.length, 'chars');
+        console.log('First 3000 chars of extracted text:');
+        console.log(text.slice(0, 3000));
+        console.log('Last 1500 chars:');
+        console.log(text.slice(-1500));
         parsed = parseGPayStatement(text);
+        console.log(`Parser matched ${parsed.length} transactions`);
+        if (parsed.length > 0) {
+          console.table(parsed.slice(0, 5).map(({ merchant, amount, currency, transaction_date, raw_type }) => ({
+            merchant, amount, currency, transaction_date, raw_type,
+          })));
+        }
+        console.groupEnd();
       } catch (e) {
         throw new UploadError(
           `Couldn't read the PDF: ${e instanceof Error ? e.message : 'unknown error'}. ` +
