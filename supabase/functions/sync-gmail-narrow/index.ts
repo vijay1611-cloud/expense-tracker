@@ -22,8 +22,11 @@ const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
 
-const MAX_EMAILS_PER_PATTERN = 5;
-const MAX_TOTAL_EMAILS = 15;             // total cap across all patterns
+const MAX_EMAILS_PER_PATTERN = 15;       // matches total cap — a single pattern
+                                         // can use the whole budget. Adding more
+                                         // patterns later still works because the
+                                         // total cap below gates everything.
+const MAX_TOTAL_EMAILS = 15;             // hard cap across all patterns combined
 const GEMINI_DELAY_MS = 7000;
 const SEARCH_WINDOW = 'newer_than:90d';
 
