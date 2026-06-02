@@ -15,6 +15,7 @@
 import { createClient } from 'supabase';
 import { decode, gmailGet, gmailList } from './gmail.ts';
 import { geminiExtract } from './gemini.ts';
+import { categorize } from './rules.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -143,14 +144,17 @@ Deno.serve(async (req) => {
       const decoded = decode(msg);
       const ext = await geminiExtract(decoded.subject, decoded.body, GEMINI_API_KEY);
       if (ext.is_expense && ext.amount !== null && ext.transaction_date !== null) {
+        // Apply the same rules engine as the PDF flow so categorization
+        // is consistent. Gemini's category is the fallback when no rule fires.
+        const ruled = categorize(ext.merchant ?? '', ext.category, ext.is_subscription);
         rows.push({
           user_id: userId,
           merchant: ext.merchant,
           amount: ext.amount,
           currency: ext.currency ?? 'INR',
           transaction_date: ext.transaction_date,
-          category: ext.category,
-          is_subscription: ext.is_subscription,
+          category: ruled.category,
+          is_subscription: ruled.is_subscription,
           source_email: `gmail:${id}`,
           source_subject: decoded.subject.slice(0, 500),
         });

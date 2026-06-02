@@ -29,19 +29,44 @@ export interface Extraction {
 const ENDPOINT =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
 
-const SYSTEM_INSTRUCTION = `You extract one transaction from an email the user has
-explicitly chosen to scan (they added the subject pattern themselves). Return
-JSON matching the schema.
+const SYSTEM_INSTRUCTION = `You extract one transaction from a bank's debit/credit
+alert email. Return JSON matching the schema.
 
-Rules:
-- The email is almost certainly a real transaction. Default is_expense=true if
-  there's a clear merchant + amount + date.
-- If it's a refund/credit/cashback (money IN), set is_expense=false.
-- If a date is missing from the body, infer the year from context or set to
-  today's year.
+CRITICAL — what counts as the merchant:
+The bank that sent the email (Axis Bank, HDFC, ICICI, SBI, IDBI, Kotak, etc.)
+is NEVER the merchant — it is just the sender of the alert. The real merchant
+is the COUNTERPARTY where the money went, usually appearing in the body as:
+  - The "Info:" / "Description:" field
+  - A UPI VPA like "SWIGGY-1234@icici"
+  - A POS terminal label like "POS*RELIANCE FRESH"
+  - The "to" / "transferred to" / "paid to" / "merchant" name
+Strip any prefixes like "VPS*", "VPA*", "POS*", "UPI*", "MERCHANT-", and trim.
+
+Examples:
+  Subject: "INR 500 was debited from your A/c no. XX9324"
+  Body excerpt: "Info: UPI/SWIGGY-1234567890/Payment from..."
+  → merchant: "Swiggy"
+
+  Subject: "Transaction alert"
+  Body: "Rs. 2,500 has been spent on your debit card at AMAZON RETAIL ..."
+  → merchant: "Amazon"
+
+  Subject: "Debit alert"
+  Body: "POS purchase of Rs 800 at RELIANCE FRESH GANDHIPURAM was..."
+  → merchant: "Reliance Fresh"
+
+Only return merchant: "Axis Bank" (or similar) if the email is genuinely
+about a BANK CHARGE — e.g. annual maintenance fee, ATM fee, SMS alert charge.
+In that case category should be "Bills".
+
+Other rules:
+- Default is_expense=true if there's a clear merchant + amount + date.
+- For refunds, credits, cashback, money received (any IN-flow), set
+  is_expense=false.
+- If no date is in the body, use today's year and the most recent date hint.
 - currency: 3-letter ISO. ₹ → INR.
-- merchant: brand name (Amazon, Swiggy, HDFC Bank, etc.).
-- category: best fit from the enum. Map UPI/transfers → Other; bank charges → Bills.`;
+- category: best fit from the enum. UPI/transfers → Other; bank charges → Bills.
+- If you cannot find a clear counterparty merchant, set is_expense=false.`;
 
 const RESPONSE_SCHEMA = {
   type: 'object',

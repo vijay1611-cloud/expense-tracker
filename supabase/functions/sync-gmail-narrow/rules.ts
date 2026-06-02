@@ -1,24 +1,26 @@
-import { TransactionCategory } from '../models/transaction.model';
+// Mirror of expense-tracker/src/app/services/category-rules.ts kept here
+// so the sync-gmail-narrow Edge Function applies the same categorization
+// that PDF uploads do. Keep these in sync when adding new rules.
 
-/**
- * Rules engine for assigning a category based on the merchant name.
- * Rules are matched IN ORDER; the first regex that hits wins. So put the more
- * specific patterns at the top of each category section. Anything that
- * doesn't match falls through to 'Other'.
- *
- * Curated for common Indian merchants. Add more as new patterns surface in
- * real data — this is the single source of truth for categorization.
- */
+type Category =
+  | 'Food'
+  | 'Transport'
+  | 'Shopping'
+  | 'Entertainment'
+  | 'Bills'
+  | 'Travel'
+  | 'Health'
+  | 'Subscriptions'
+  | 'Other';
 
 interface Rule {
   pattern: RegExp;
-  category: TransactionCategory;
+  category: Category;
   isSubscription?: boolean;
 }
 
 const RULES: readonly Rule[] = [
-  // ─── Subscriptions (matched first — Apple/Google identifiers can also
-  //     appear in Shopping rules, so order matters) ──────────────────────
+  // Subscriptions
   { pattern: /\bapple\s+media\s+services\b/i, category: 'Subscriptions', isSubscription: true },
   { pattern: /\b(itunes|app\s?store\b|appstore)\b/i, category: 'Subscriptions', isSubscription: true },
   { pattern: /\bgoogle\s+(play|one)\b|play\s?store/i, category: 'Subscriptions', isSubscription: true },
@@ -28,7 +30,7 @@ const RULES: readonly Rule[] = [
   { pattern: /\b(notion|figma|adobe|microsoft\s?365|office\s?365|github|gitlab|jetbrains|1password|dropbox|icloud)\b/i, category: 'Subscriptions', isSubscription: true },
   { pattern: /\b(canva|grammarly|chatgpt|claude\s?pro|gemini\s?advanced|openai|anthropic)\b/i, category: 'Subscriptions', isSubscription: true },
 
-  // ─── Food & dining ────────────────────────────────────────────────────
+  // Food
   { pattern: /\bswiggy\b|swiggy[\s-]?instamart|swiggy[\s-]?genie/i, category: 'Food' },
   { pattern: /\bzomato\b|hyperpure/i, category: 'Food' },
   { pattern: /\b(blinkit|zepto|dunzo|bigbasket|big\s?basket|jiomart|grofers|natures\s?basket)\b/i, category: 'Food' },
@@ -37,9 +39,9 @@ const RULES: readonly Rule[] = [
   { pattern: /\b(biryani|briyani|biriyani|thali|tiffin|dosa|idli|sambar|chettinad|andhra|kerala|punjabi|south\s?indian|north\s?indian|chinese|mughlai)\b/i, category: 'Food' },
   { pattern: /\b(cafe|coffee|restaurant|baker[sy]|baker'?s|bakehouse|hotel|dhaba|mess|bhavan|sweets?|mithai|juice|ice\s?cream)\b/i, category: 'Food' },
   { pattern: /\btea\s?time\b|\bchai\b|\btea\s+stall\b/i, category: 'Food' },
-  { pattern: /\b(nation|kitchen|spice|tandoor|grill|kebab|dosa|veg|non[\s-]?veg|biryanis?)\b/i, category: 'Food' },
+  { pattern: /\b(nation|kitchen|spice|tandoor|grill|kebab|veg|non[\s-]?veg|biryanis?)\b/i, category: 'Food' },
 
-  // ─── Transport ────────────────────────────────────────────────────────
+  // Transport
   { pattern: /\b(uber|ola|rapido|namma\s?yatri|lyft)\b/i, category: 'Transport' },
   { pattern: /\b(irctc|indian\s?railways|redrail|redbus|abhibus)\b/i, category: 'Transport' },
   { pattern: /\b(mtc|bmtc|best|dtc|ksrtc|tsrtc|apsrtc|msrtc|tnstc)\b/i, category: 'Transport' },
@@ -48,37 +50,35 @@ const RULES: readonly Rule[] = [
   { pattern: /\b(indian\s?oil|iocl|bharat\s?petroleum|bpcl|hp\s?petrol|hindustan\s?petroleum|shell|reliance\s?petrol|nayara|petrol\s?pump|fuel|diesel)\b/i, category: 'Transport' },
   { pattern: /\b(parking|toll|auto\s?rickshaw|rickshaw)\b/i, category: 'Transport' },
 
-  // ─── Travel ───────────────────────────────────────────────────────────
+  // Travel
   { pattern: /\b(makemytrip|cleartrip|yatra|easemytrip|goibibo|booking\.com|airbnb|agoda|trivago|ixigo|abhibus)\b/i, category: 'Travel' },
   { pattern: /\b(indigo|spicejet|air\s?india|vistara|akasa|emirates|qatar\s?airways|lufthansa|singapore\s?airlines)\b/i, category: 'Travel' },
   { pattern: /\b(hotel\s?booking|resort|oyo|treebo|fabhotel|holiday|tour\s?package)\b/i, category: 'Travel' },
 
-  // ─── Bills / utilities ────────────────────────────────────────────────
+  // Bills
   { pattern: /\b(electricity|bescom|tneb|msedcl|adani\s?electricity|tata\s?power|reliance\s?energy|cesc)\b/i, category: 'Bills' },
   { pattern: /\b(airtel|jio|vodafone|vi\s|bsnl|recharge|postpaid|prepaid|mobile\s?bill)\b/i, category: 'Bills' },
   { pattern: /\b(act\s?broadband|hathway|excitel|airtel\s?xstream|jio\s?fiber|gas\s?bill|indane|hp\s?gas|water\s?bill)\b/i, category: 'Bills' },
   { pattern: /\b(rent|maintenance|society\s?maintenance|nobroker|housing\s?society)\b/i, category: 'Bills' },
   { pattern: /\b(insurance|premium|policy)\b/i, category: 'Bills' },
 
-  // ─── Health (incl. salons/spa per user convention) ────────────────────
+  // Health
   { pattern: /\b(salon|saloon|parlou?r|beauty\s?parlou?r|spa|barber)\b/i, category: 'Health' },
   { pattern: /\bnursing\s?home\b/i, category: 'Health' },
   { pattern: /\b(hospital|clinic|diagnostic|lab|pathology|polyclinic)\b/i, category: 'Health' },
-  // No trailing \b on `medicals?` / `chemists?` so run-on names like
-  // `MEDICALSVIJAYALAKSHMI` still match.
   { pattern: /\bmedicals?|medical\s?store|\bpharmacy\b|\bchemists?|drugs?\s?store|drug\s?mart/i, category: 'Health' },
   { pattern: /\b(apollo|medplus|netmeds|pharmeasy|1mg|tata\s?1mg|practo|cult\.?fit|cultfit|wellbeing)\b/i, category: 'Health' },
   { pattern: /\bproteins?|\bsupplements?|\bnutrition|\bwhey|\bgym\b|\bfitness\b|\byoga\b|cross\s?fit/i, category: 'Health' },
   { pattern: /\b(dental|dentist|optic|optical|eye\s?care|ayurveda|homeopath)\b/i, category: 'Health' },
 
-  // ─── Shopping ─────────────────────────────────────────────────────────
+  // Shopping
   { pattern: /\b(super\s?market|supermarket|hyper\s?market|hypermarket|mall|department\s?store)\b/i, category: 'Shopping' },
   { pattern: /\b(amazon|flipkart|myntra|ajio|meesho|nykaa|tata\s?cliq|shoppers\s?stop|lifestyle|pantaloons|reliance\s?trends)\b/i, category: 'Shopping' },
   { pattern: /\b(croma|reliance\s?digital|vijay\s?sales|apple\s?store|samsung\s?store|poorvika|sangeetha)\b/i, category: 'Shopping' },
   { pattern: /\b(decathlon|firstcry|hopscotch|mamaearth|the\s?body\s?shop|chumbak|fabindia|westside|max)\b/i, category: 'Shopping' },
   { pattern: /\b(kirana|provisions?|general\s?store|stationary|stationery|hardware|book\s?store|saree|jewelle?ry|tailor)\b/i, category: 'Shopping' },
 
-  // ─── Entertainment ────────────────────────────────────────────────────
+  // Entertainment
   { pattern: /\b(bookmyshow|paytm\s?insider|district)\b/i, category: 'Entertainment' },
   { pattern: /\b(pvr|inox|cinepolis|movie|cinema|theatre)\b/i, category: 'Entertainment' },
   { pattern: /\b(steam|playstation|psn|xbox|epic\s?games|nintendo|gaming)\b/i, category: 'Entertainment' },
@@ -86,9 +86,10 @@ const RULES: readonly Rule[] = [
 
 export function categorize(
   merchant: string,
-  fallback: TransactionCategory = 'Other',
-): { category: TransactionCategory; is_subscription: boolean } {
-  if (!merchant) return { category: fallback, is_subscription: false };
+  fallbackCategory: Category = 'Other',
+  fallbackIsSubscription = false,
+): { category: Category; is_subscription: boolean } {
+  if (!merchant) return { category: fallbackCategory, is_subscription: fallbackIsSubscription };
   for (const rule of RULES) {
     if (rule.pattern.test(merchant)) {
       return {
@@ -97,5 +98,5 @@ export function categorize(
       };
     }
   }
-  return { category: fallback, is_subscription: false };
+  return { category: fallbackCategory, is_subscription: fallbackIsSubscription };
 }
